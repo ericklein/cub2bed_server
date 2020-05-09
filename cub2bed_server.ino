@@ -8,6 +8,23 @@
 
 #define DEBUG       // Output to the serial port
 
+//button
+#include <buttonhandler.h>
+#define onTheWayButtonPin     11
+#define needToWorkButtonPin   12
+#define longButtonPressDelay  3000
+ButtonHandler buttonOnTheWay(onTheWayButtonPin,longButtonPressDelay);
+ButtonHandler buttonNeedToWork(needToWorkButtonPin, longButtonPressDelay);
+// globals related to buttons
+enum { BTN_NOPRESS = 0, BTN_SHORTPRESS, BTN_LONGPRESS };
+
+//NeoPixel
+#include <Adafruit_NeoPixel.h>
+#define neoPixelPin  10
+#define ledCount  1
+//Adafruit_NeoPixel strip = Adafruit_NeoPixel(ledCount, neoPixelPin, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(ledCount, neoPixelPin);
+
 // 900mhz radio
 #include <SPI.h>
 #include <RH_RF69.h>
@@ -25,8 +42,11 @@
   #define RFM69_RST     2
 #endif
 
+// server address
+#define MY_ADDRESS      1
 // unique addresses for each client, can not be server address
-#define MY_ADDRESS 1
+#define CLIENT_ADDRESS  2
+
 
 // Instantiate radio driver
 RH_RF69 rf69(RFM69_CS, RFM69_INT);
@@ -90,31 +110,158 @@ void setup()
     Serial.print((int)RF69_FREQ);
     Serial.println("MHz. This node is server.");
   #endif
+
+  // Setup push button
+  buttonNeedToWork.init();
+  buttonOnTheWay.init();
+
+  // initialize neopixel
+  strip.begin();
+  // green = nothing to see, move along
+  //strip.setPixelColor(0,0,255,0);
+  //strip.setBrightness(50);
+  strip.show();
 }
 
-// Dont put this on the stack:
-uint8_t data[] = "ROGER WILCO";
-// Dont put this on the stack:
+bool  requestFromClient = false;
 uint8_t buf[RH_RF69_MAX_MESSAGE_LEN];
 
-void loop() {
-  if (rf69_manager.available())
+void loop()
+{
+  // if radio is ready and we're not already handling a client request
+  if ((rf69_manager.available()) && (!requestFromClient))
   {
-    // Wait for a message addressed to us from the client
+    // Wait for a message from a client
     uint8_t len = sizeof(buf);
-    uint8_t from;
-    if (rf69_manager.recvfromAck(buf, &len, &from)) {
+    uint8_t from; 
+    if (rf69_manager.recvfromAck(buf, &len, &from))
+    {
+      #ifdef DEBUG
+        Serial.print("Got packet from #");
+        Serial.print(from);
+        Serial.print(" [RSSI :");
+        Serial.print(rf69.lastRssi());
+        Serial.print("] : ");
+        Serial.println((char*)buf);
+      #endif
+      // block request processing until resolved
+      requestFromClient = true;
       buf[len] = 0; // zero out remaining string
-      
-      Serial.print("Got packet from #"); Serial.print(from);
-      Serial.print(" [RSSI :");
-      Serial.print(rf69.lastRssi());
-      Serial.print("] : ");
-      Serial.println((char*)buf);
-
-      // Send a reply back to the originator client
-      if (!rf69_manager.sendtoWait(data, sizeof(data), from))
-        Serial.println("Sending failed (no ack)");
+      // visually indicate that we have a user request
+      strip.setPixelColor(0,255,255,0); // yellow
+      strip.show();
+      #ifdef DEBUG
+        Serial.println("Need to respond to client request");
+      #endif
     }
+  }
+  resolveButtons();
+}
+
+void resolveButtons()
+{
+  switch (buttonOnTheWay.handle()) 
+  {
+    case BTN_SHORTPRESS:
+      #ifdef DEBUG
+        Serial.print("short press of on-the-way button; ");
+      #endif
+      // process pending requests only
+      if (requestFromClient)
+      {
+        uint8_t data[] = "ontheway";
+        //send response to client
+        if (!rf69_manager.sendtoWait(data, sizeof(data), CLIENT_ADDRESS))
+        {
+          #ifdef DEBUG
+            Serial.println("Sending failed (no ack)");
+          #endif
+        }
+        else
+        {
+          // release processing block and return to waiting
+          requestFromClient = false;
+          // blink green to indicate success
+          for (int i=0;i<10;i++)
+          {
+            strip.setPixelColor(0,0,255,0); // green
+            strip.show();
+            delay(100);
+            strip.setPixelColor(0,0,0,0);
+            strip.show();
+            delay(100);
+          }
+          // deactivate alert light
+          strip.setPixelColor(0,0,0,0);
+          strip.show();
+          #ifdef DEBUG
+            Serial.println("resolved");
+          #endif
+        }
+      }
+      else
+      {
+        #ifdef DEBUG
+          Serial.println("ignored");
+        #endif
+      }
+    break;
+    case BTN_LONGPRESS:
+      #ifdef DEBUG
+        Serial.println("long press of on-the-way button");
+      #endif
+    break;
+  }
+  switch (buttonNeedToWork.handle()) 
+  {
+    case BTN_SHORTPRESS:
+      #ifdef DEBUG
+        Serial.print("short press of need-to-work button; ");
+      #endif
+      // process pending requests only
+      if (requestFromClient)
+      {
+        uint8_t data[] = "needtowork";
+        //send response to client
+        if (!rf69_manager.sendtoWait(data, sizeof(data), CLIENT_ADDRESS))
+        {
+          #ifdef DEBUG
+            Serial.println("Sending failed (no ack)");
+          #endif
+        }
+        else
+        {
+          // release processing block and return to waiting
+          requestFromClient = false;
+          // blink red to indicate success
+          for (int i=0;i<10;i++)
+          {
+            strip.setPixelColor(0,255,0,0); // red
+            strip.show();
+            delay(100);
+            strip.setPixelColor(0,0,0,0);
+            strip.show();
+            delay(100);
+          }
+          // deactivate alert light
+          strip.setPixelColor(0,0,0,0);
+          strip.show();
+          #ifdef DEBUG
+            Serial.println("resolved");
+          #endif
+        }
+      }
+      else
+      {
+        #ifdef DEBUG
+          Serial.println("ignored");
+        #endif
+      }
+    break;
+    case BTN_LONGPRESS:
+      #ifdef DEBUG
+        Serial.println("long press of need-to-work button");
+      #endif
+    break;
   }
 }
