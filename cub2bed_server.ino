@@ -7,23 +7,31 @@
 */
 
 #define DEBUG       // Output to the serial port
+#define NEOPIXEL    // output to neopixel(s)
+#define RELAY
+
+// Remember: pins 3,4,8 are reserved for radio
 
 //button
 #include <buttonhandler.h>
 #define onTheWayButtonPin     11
-#define needToWorkButtonPin   12
+#define needToWorkButtonPin   10
 #define longButtonPressDelay  3000
 ButtonHandler buttonOnTheWay(onTheWayButtonPin,longButtonPressDelay);
 ButtonHandler buttonNeedToWork(needToWorkButtonPin, longButtonPressDelay);
 // globals related to buttons
 enum { BTN_NOPRESS = 0, BTN_SHORTPRESS, BTN_LONGPRESS };
 
-//NeoPixel
-#include <Adafruit_NeoPixel.h>
-#define neoPixelPin  10
-#define ledCount  1
-//Adafruit_NeoPixel strip = Adafruit_NeoPixel(ledCount, neoPixelPin, NEO_GRB + NEO_KHZ800);
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(ledCount, neoPixelPin);
+#ifdef RELAY
+  #define relay_trigger_PIN 12
+#endif
+
+#ifdef NEOPIXEL
+  #include <Adafruit_NeoPixel.h>
+  #define neoPixelPin   9
+  #define ledCount      1
+  Adafruit_NeoPixel strip = Adafruit_NeoPixel(ledCount, neoPixelPin);
+#endif
 
 // 900mhz radio
 #include <SPI.h>
@@ -46,8 +54,6 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel(ledCount, neoPixelPin);
 #define MY_ADDRESS      1
 // unique addresses for each client, can not be server address
 #define CLIENT_ADDRESS  2
-
-
 // Instantiate radio driver
 RH_RF69 rf69(RFM69_CS, RFM69_INT);
 // Class to manage message delivery and receipt, using the driver declared above
@@ -66,6 +72,14 @@ void setup()
       {
         delay(1);
       }
+      Serial.println("cub2bed server started");
+      #ifdef RELAY
+        Serial.print("RELAY");
+      #endif
+      #ifdef NEOPIXEL
+        Serial.print(" NEOPIXEL");
+      #endif
+      Serial.println(" code path(s) enabled");
   #endif
 
   // radio setup
@@ -107,20 +121,25 @@ void setup()
   // radio successfully set up
   #ifdef DEBUG
     Serial.print("RFM69 radio OK @ ");
-    Serial.print((int)RF69_FREQ);
-    Serial.println("MHz. This node is server.");
+    Serial.println((int)RF69_FREQ);
   #endif
 
-  // Setup push button
+  // Setup push buttons
   buttonNeedToWork.init();
   buttonOnTheWay.init();
 
-  // initialize neopixel
-  strip.begin();
-  // green = nothing to see, move along
-  //strip.setPixelColor(0,0,255,0);
-  //strip.setBrightness(50);
-  strip.show();
+  #ifdef RELAY
+    pinMode(relay_trigger_PIN, OUTPUT);
+  #endif
+
+  #ifdef NEOPIXEL
+    // initialize neopixel
+    strip.begin();
+    // green = nothing to see, move along
+    //strip.setPixelColor(0,0,255,0);
+    //strip.setBrightness(50);
+    strip.show();
+  #endif
 }
 
 bool  requestFromClient = false;
@@ -148,8 +167,14 @@ void loop()
       requestFromClient = true;
       buf[len] = 0; // zero out remaining string
       // visually indicate that we have a user request
-      strip.setPixelColor(0,255,255,0); // yellow
-      strip.show();
+      #ifdef NEOPIXEL
+        strip.setPixelColor(0,255,255,0); // yellow
+        strip.show();
+      #endif
+      #ifdef RELAY
+        // turn on light
+        digitalWrite(relay_trigger_PIN, HIGH);
+      #endif
       #ifdef DEBUG
         Serial.println("Need to respond to client request");
       #endif
@@ -174,28 +199,37 @@ void resolveButtons()
         if (!rf69_manager.sendtoWait(data, sizeof(data), CLIENT_ADDRESS))
         {
           #ifdef DEBUG
-            Serial.println("Sending failed (no ack)");
+            Serial.print(" RSSI= ");
+            Serial.println(rf69.lastRssi());
+            Serial.println("; Sending failed (no ack)");
           #endif
         }
         else
         {
           // release processing block and return to waiting
           requestFromClient = false;
-          // blink green to indicate success
-          for (int i=0;i<10;i++)
-          {
-            strip.setPixelColor(0,0,255,0); // green
-            strip.show();
-            delay(100);
+          #ifdef RELAY
+            digitalWrite(relay_trigger_PIN, LOW);
+          #endif
+          #ifdef NEOPIXEL
+            // blink green to indicate success
+            for (int i=0;i<10;i++)
+            {
+              strip.setPixelColor(0,0,255,0); // green
+              strip.show();
+              delay(100);
+              strip.setPixelColor(0,0,0,0);
+              strip.show();
+              delay(100);
+            }
+            // deactivate alert light
             strip.setPixelColor(0,0,0,0);
             strip.show();
-            delay(100);
-          }
-          // deactivate alert light
-          strip.setPixelColor(0,0,0,0);
-          strip.show();
+          #endif
           #ifdef DEBUG
             Serial.println("resolved");
+            Serial.print("RSSI= ");
+            Serial.print(rf69.lastRssi());
           #endif
         }
       }
@@ -226,28 +260,37 @@ void resolveButtons()
         if (!rf69_manager.sendtoWait(data, sizeof(data), CLIENT_ADDRESS))
         {
           #ifdef DEBUG
-            Serial.println("Sending failed (no ack)");
+            Serial.print(" RSSI= ");
+            Serial.println(rf69.lastRssi());
+            Serial.println("; Sending failed (no ack)");
           #endif
         }
         else
         {
           // release processing block and return to waiting
           requestFromClient = false;
-          // blink red to indicate success
-          for (int i=0;i<10;i++)
-          {
-            strip.setPixelColor(0,255,0,0); // red
-            strip.show();
-            delay(100);
+          #ifdef RELAY
+            digitalWrite(relay_trigger_PIN, LOW);
+          #endif
+          #ifdef NEOPIXEL
+            // blink red to indicate success
+            for (int i=0;i<10;i++)
+            {
+              strip.setPixelColor(0,255,0,0); // red
+              strip.show();
+              delay(100);
+              strip.setPixelColor(0,0,0,0);
+              strip.show();
+              delay(100);
+            }
+            // deactivate alert light
             strip.setPixelColor(0,0,0,0);
             strip.show();
-            delay(100);
-          }
-          // deactivate alert light
-          strip.setPixelColor(0,0,0,0);
-          strip.show();
+          #endif
           #ifdef DEBUG
             Serial.println("resolved");
+            Serial.print("RSSI= ");
+            Serial.print(rf69.lastRssi());
           #endif
         }
       }

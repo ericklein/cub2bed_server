@@ -1,0 +1,6 @@
+{
+    "sketch": "cub2bed_server.ino",
+    "board": "adafruit:samd:adafruit_metro_m0",
+    "configuration": "usbstack=arduino,debug=off",
+    "output": "build"
+}
